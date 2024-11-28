@@ -118,7 +118,7 @@ class BookSearchPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 200, 20, 0),
+        padding: const EdgeInsets.fromLTRB(25, 250, 20, 0),
         child: Column(
           children: [
             Text(
