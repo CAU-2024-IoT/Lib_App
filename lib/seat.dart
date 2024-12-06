@@ -1,4 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+
+String apiKey = 'http://175.113.202.160:2028';
 
 class SeatReservationPage extends StatefulWidget {
   @override
@@ -8,25 +13,98 @@ class SeatReservationPage extends StatefulWidget {
 class _SeatReservationPageState extends State<SeatReservationPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  late WebSocket _socket;
 
   final List<String> readingRooms = ['열람실1', '열람실2', '열람실3'];
 
-  final Map<String, List<List<bool>>> seatStatusMap = {
-    '열람실1': List.generate(4, (_) => List.generate(4, (_) => false)),
-    '열람실2': List.generate(4, (_) => List.generate(4, (_) => false)),
-    '열람실3': List.generate(4, (_) => List.generate(4, (_) => false)),
+  final Map<String, List<List<Map<String, dynamic>>>> seatStatusMap = {
+    '열람실1': List.generate(
+        4, (_) => List.generate(4, (_) => {'status': false, 'isLocal': false})),
+    '열람실2': List.generate(
+        4, (_) => List.generate(4, (_) => {'status': false, 'isLocal': false})),
+    '열람실3': List.generate(
+        4, (_) => List.generate(4, (_) => {'status': false, 'isLocal': false})),
   };
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: readingRooms.length, vsync: this);
+    _connectToWebSocket();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _socket.close();
     super.dispose();
+  }
+
+  /// WebSocket 연결
+  void _connectToWebSocket() async {
+    try {
+      _socket = await WebSocket.connect('ws://$apiKey'); // WebSocket 주소
+      print("Connected to WebSocket");
+
+      // 메시지 수신
+      _socket.listen((message) {
+        final data = jsonDecode(message);
+
+        if (data['type'] == 'seatStatusUpdate') {
+          _updateSeatStatusFromServer(data['seatStatus']);
+        }
+      });
+    } catch (e) {
+      print("WebSocket connection error: $e");
+    }
+  }
+
+  /// 서버에서 수신한 데이터로 좌석 상태 업데이트
+  void _updateSeatStatusFromServer(Map<String, dynamic> newSeatStatus) {
+    setState(() {
+      for (var room in readingRooms) {
+        if (newSeatStatus.containsKey(room)) {
+          seatStatusMap[room] = List<List<Map<String, dynamic>>>.from(
+            newSeatStatus[room].map(
+                  (row) => List<Map<String, dynamic>>.from(
+                row.map((seat) => {
+                  'status': seat['status'],
+                  'isLocal': false, // 서버에서 받은 상태는 로컬 클릭 아님
+                }),
+              ),
+            ),
+          );
+        }
+      }
+    });
+  }
+
+  /// 좌석 상태 변경 및 서버로 전송
+  void _toggleSeat(String room, int row, int col) {
+    setState(() {
+      seatStatusMap[room]![row][col] = {
+        'status': !seatStatusMap[room]![row][col]['status'],
+        'isLocal': true, // 로컬에서 클릭한 상태로 설정
+      };
+    });
+
+    // 서버로 업데이트 전송
+    final updateMessage = jsonEncode({
+      'type': 'seatStatusChange',
+      'room': room,
+      'row': row,
+      'col': col,
+      'status': seatStatusMap[room]![row][col]['status'],
+    });
+    _socket.add(updateMessage);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(seatStatusMap[room]![row][col]['status']
+            ? '$room - ${row + 1}열 ${col + 1}번 자리가 예약되었습니다.'
+            : '$room - ${row + 1}열 ${col + 1}번 예약이 취소되었습니다.'),
+      ),
+    );
   }
 
   @override
@@ -51,25 +129,11 @@ class _SeatReservationPageState extends State<SeatReservationPage>
       ),
     );
   }
-
-  void _toggleSeat(String room, int row, int col) {
-    setState(() {
-      seatStatusMap[room]![row][col] = !seatStatusMap[room]![row][col];
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(seatStatusMap[room]![row][col]
-            ? '$room - ${row + 1}열 ${col + 1}번 자리가 예약되었습니다.'
-            : '$room - ${row + 1}열 ${col + 1}번 예약이 취소되었습니다.'),
-      ),
-    );
-    // TODO: API 호출로 예약/취소 상태 업데이트
-  }
 }
 
 class SeatGrid extends StatelessWidget {
   final String roomName;
-  final List<List<bool>> seatStatus;
+  final List<List<Map<String, dynamic>>> seatStatus;
   final void Function(int row, int col) onToggleSeat;
 
   const SeatGrid({
@@ -80,10 +144,9 @@ class SeatGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 좌석 크기 및 간격 설정
     final seatSize = 80.0;
-    final verticalSpacing = 16.0; // 위아래 간격
-    final horizontalSpacing = 2.0; // 좌우 간격 (아주 살짝)
+    final verticalSpacing = 16.0;
+    final horizontalSpacing = 2.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -93,49 +156,53 @@ class SeatGrid extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(height: 30,),
-              // 행 번호 (작은 크기)
+              SizedBox(height: 30),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 43.0),
                 child: Text(
-                  '${rowIndex + 1}번 책상', // '1행', '2행' 형식으로 표시
+                  '${rowIndex + 1}번 책상',
                   style: TextStyle(
-                    fontSize: 16, // 행 텍스트 크기 조정
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              // 각 행에 해당하는 열 번호 표시
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(
                   seatStatus[rowIndex].length,
-                      (colIndex) => GestureDetector(
-                    onTap: () => onToggleSeat(rowIndex, colIndex),
-                    child: Container(
-                      width: seatSize,
-                      height: seatSize,
-                      margin: EdgeInsets.symmetric(horizontal: horizontalSpacing), // 좌우 간격
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: seatStatus[rowIndex][colIndex]
-                            ? Colors.redAccent
-                            : Colors.green,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '${colIndex + 1}', // 열 번호 1, 2, 3, 4
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: seatSize * 0.3, // 좌석 크기에 맞는 폰트 크기
+                      (colIndex) {
+                    final seat = seatStatus[rowIndex][colIndex];
+                    final color = seat['status']
+                        ? (seat['isLocal'] ? Colors.yellow : Colors.redAccent)
+                        : Colors.green;
+
+                    return GestureDetector(
+                      onTap: () => onToggleSeat(rowIndex, colIndex),
+                      child: Container(
+                        width: seatSize,
+                        height: seatSize,
+                        margin:
+                        EdgeInsets.symmetric(horizontal: horizontalSpacing),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${colIndex + 1}',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: seatSize * 0.3,
+                          ),
                         ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
               ),
-              SizedBox(height: 20,),
+              SizedBox(height: 20),
             ],
           );
         },
