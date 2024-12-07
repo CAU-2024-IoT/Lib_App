@@ -6,8 +6,10 @@ import 'seat.dart';
 import 'book.dart';
 import 'BookListScreen.dart';
 
-String apiKey = 'http://175.113.202.160:2028';
+// API 및 토큰
+String apiKey = 'http://192.168.1.208:2028';
 String token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjZ9.Vb0IrHYvDaZ2b_YjFFkjnDBbWDnBjaNiQeVTcm_S5wo';
+
 void main() {
   runApp(MyApp());
 }
@@ -30,12 +32,26 @@ class BookSearchScreen extends StatefulWidget {
 
 class _BookSearchScreenState extends State<BookSearchScreen> {
   TextEditingController _searchController = TextEditingController();
-  bool isLoading = false;
+  bool isLoading = false; // Explicit initialization to avoid null errors
   String errorMessage = '';
   List<Book> bookList = [];
-  int _selectedIndex = 0; // 선택된 페이지 인덱스
+  int _selectedIndex = 0;
 
-  // API 호출하여 책 검색
+  late List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      BookSearchPage(
+        onSearch: (query) => searchBooks(query),
+        isLoading: isLoading, // Pass isLoading state
+      ),
+      SeatReservationPage(),
+    ];
+  }
+
+  // Update isLoading in setState to ensure it's always passed correctly
   Future<void> searchBooks(String query) async {
     setState(() {
       isLoading = true;
@@ -44,7 +60,8 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
 
     try {
       final response = await http.get(
-        Uri.parse('$apiKey/api/v1/books'), // Replace with your API URL
+        Uri.parse('$apiKey/api/v1/books'),
+        headers: {'Authorization': 'Bearer $token'},
       );
 
       if (response.statusCode == 200) {
@@ -54,11 +71,21 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
           setState(() {
             bookList = books.map((book) => Book.fromJson(book)).toList();
           });
-          // 검색 결과를 새로운 페이지로 전달
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => BookListScreen(bookList: bookList),
+              builder: (context) => BookListScreen(
+                bookList: bookList,
+                onBookUpdated: (updatedBook) {
+                  setState(() {
+                    // Update the book list with the updated book
+                    final index = bookList.indexWhere((book) => book.book_id == updatedBook.book_id);
+                    if (index != -1) {
+                      bookList[index] = updatedBook;
+                    }
+                  });
+                },
+              ),
             ),
           );
         } else {
@@ -82,26 +109,23 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
     }
   }
 
-  // 페이지 목록
-  final List<Widget> _pages = [
-    BookSearchPage(), // 책 검색 페이지
-    SeatReservationPage(), // 좌석 예약 페이지
-  ];
-
-  // 하단탭 클릭 이벤트
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Rebuild pages to update isLoading state
+    _pages[0] = BookSearchPage(
+      onSearch: (query) => searchBooks(query),
+      isLoading: isLoading,
+    );
+
     return Scaffold(
-      body: _pages[_selectedIndex], // 선택된 페이지 표시
+      body: _pages[_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
+        onTap: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
         items: [
           BottomNavigationBarItem(
             icon: Icon(Icons.book),
@@ -118,8 +142,15 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
 }
 
 class BookSearchPage extends StatelessWidget {
+  final Function(String) onSearch;
+  final bool isLoading;
+
+  BookSearchPage({required this.onSearch, required this.isLoading});
+
   @override
   Widget build(BuildContext context) {
+    TextEditingController _searchController = TextEditingController();
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(25, 250, 20, 0),
@@ -136,10 +167,19 @@ class BookSearchPage extends StatelessWidget {
               width: 200,
             ),
             SizedBox(height: 20),
+            if (isLoading)
+              CircularProgressIndicator(), // Show loading indicator
+            SizedBox(height: 20),
             TextField(
+              controller: _searchController,
               decoration: InputDecoration(
                 hintText: '책 이름을 입력하세요.',
-                suffixIcon: Icon(Icons.search, color: Colors.teal),
+                suffixIcon: IconButton(
+                  icon: Icon(Icons.search, color: Colors.teal),
+                  onPressed: () {
+                    onSearch(_searchController.text);
+                  },
+                ),
                 border: OutlineInputBorder(),
               ),
             ),

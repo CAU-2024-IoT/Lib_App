@@ -1,29 +1,33 @@
 import 'package:flutter/material.dart';
 import 'book.dart';  // Book 클래스를 임포트
-import 'package:http/http.dart' as http;  // http 패키지 임포트
-import 'dart:convert';  // JSON을 다루기 위한 패키지
 import 'book_rental.dart';
+class BookListScreen extends StatefulWidget {
+  final List<Book> bookList;  // 책 리스트
+  final Function(Book) onBookUpdated;  // 책 정보 업데이트 함수
 
-class BookListScreen extends StatelessWidget {
-  final List<Book> bookList;
+  // BookListScreen의 생성자에서 bookList와 onBookUpdated를 받음
+  BookListScreen({required this.bookList, required this.onBookUpdated});
 
-  BookListScreen({required this.bookList});
+  @override
+  _BookListScreenState createState() => _BookListScreenState();
+}
 
+class _BookListScreenState extends State<BookListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('검색 결과')),
+      appBar: AppBar(title: Text('책 목록')),
       body: ListView.builder(
-        itemCount: bookList.length,
+        itemCount: widget.bookList.length,
         itemBuilder: (context, index) {
-          final book = bookList[index];
+          final book = widget.bookList[index];
           return ListTile(
             title: Text(book.title),
             subtitle: Text(book.author),
             trailing: Text(book.status == 'BOGAN' ? '대출 가능' : '대출 중'),
             onTap: () {
-              print('선택한 책의 상태: ${book.status}');  // 상태 출력
-              _showBookDetails(context, book);
+              // 책을 탭하면 책 수정 화면으로 이동 (book_rental.dart에서 수정 화면을 처리)
+              _showBookRental(context, book);
             },
           );
         },
@@ -31,15 +35,15 @@ class BookListScreen extends StatelessWidget {
     );
   }
 
-  void _showBookDetails(BuildContext context, Book book) {
+  void _showBookRental(BuildContext context, Book book) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BookDetailScreen(book: book),
+        builder: (context) => BookDetailScreen(
+          book: book,
+          onBookUpdated: widget.onBookUpdated,  // book_rental.dart에서 수정된 책 정보를 업데이트
+        ),
       ),
     );
   }
 }
-
-
-
